@@ -1,0 +1,7 @@
+{
+  "name": "Gestion Films v2",
+  "description": "A modern, dark-themed movie database manager connected to Google Sheets.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
