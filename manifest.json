@@ -1,7 +1,7 @@
 {
   "name": "MyMovieDB",
   "short_name": "Movies",
-  "start_url": ".",
+  "start_url": "/Gestion-de-Films-v2/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
