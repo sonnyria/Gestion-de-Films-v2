@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Search, Library, Settings, Plus, Edit2, Save, RotateCw, Loader2, AlertCircle, Trash2, X, ScanLine, Barcode, Download } from 'lucide-react';
@@ -30,29 +31,25 @@ const getSignificantTokens = (text: string) => {
     .filter(t => t.length > 1 && !STOP_WORDS.has(t));
 };
 
-const isFuzzyMatch = (libraryTitle: string, scannedTitle: string): boolean => {
+const isFuzzyMatch = (libraryTitle: string, userQuery: string): boolean => {
   const libNorm = normalizeText(libraryTitle);
-  const scanNorm = normalizeText(scannedTitle);
+  const queryNorm = normalizeText(userQuery);
 
   // 1. Inclusion directe (ex: "Matrix" dans "The Matrix Reloaded")
-  // On vérifie dans les DEUX sens : si le titre scanné contient le titre lib, ou inversement
-  if (scanNorm.includes(libNorm) || libNorm.includes(scanNorm)) {
+  if (queryNorm.includes(libNorm) || libNorm.includes(queryNorm)) {
     return true;
   }
 
   // 2. Comparaison par mots-clés significatifs
   const libTokens = getSignificantTokens(libraryTitle);
-  const scanTokens = getSignificantTokens(scannedTitle);
+  const queryTokens = getSignificantTokens(userQuery);
 
-  if (libTokens.length === 0 || scanTokens.length === 0) return false;
+  if (libTokens.length === 0 || queryTokens.length === 0) return false;
 
-  // Combien de mots du titre de ma bibliothèque se retrouvent dans le scan ?
-  const matches = libTokens.filter(token => scanTokens.includes(token)).length;
+  // Combien de mots du titre de ma bibliothèque se retrouvent dans la recherche utilisateur ?
+  const matches = libTokens.filter(token => queryTokens.includes(token)).length;
   
   // Si plus de 50% des mots du titre bibliothèque sont trouvés, c'est un match.
-  // Ex: Lib="Charlie et la chocolaterie" (Tokens: charlie, chocolaterie)
-  // Scan="Johnny Depp-Charlie et la chocolaterie" (Tokens: johnny, depp, charlie, chocolaterie)
-  // Matchs: charlie, chocolaterie (2/2) -> 100% -> OK
   const ratio = matches / libTokens.length;
 
   return ratio >= 0.5;
@@ -68,18 +65,6 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
   const [isScanning, setIsScanning] = useState(false);
   const navigate = useNavigate();
 
-  const performSearchInSheet = async (query: string) => {
-    setLoading(true);
-    const res = await movieService.search(query);
-    setLoading(false);
-    setSearched(true);
-    if (res.status === 'success' && res.data) {
-      setResults(res.data);
-    } else {
-      setResults([]);
-    }
-  };
-
   const handleSearch = async (e?: React.FormEvent, queryOverride?: string) => {
     if (e) e.preventDefault();
     let query = queryOverride !== undefined ? queryOverride : term;
@@ -87,42 +72,41 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
     
     if (!query) return;
 
+    setLoading(true);
+    setResults([]); // Reset visual
+    
+    // Détection code barre manuel
     const isManualBarcode = /^\d{8,14}$/.test(query);
+    let searchTerm = query;
 
+    // 1. Si c'est un code barre, on essaie d'abord de récupérer le titre produit
     if (isManualBarcode) {
-        setLoading(true);
         const productTitle = await barcodeService.getProductTitle(query);
-        
         if (productTitle) {
-            // "RECHERCHE INTELLIGENTE"
-            // Au lieu de chercher juste le titre exact, on récupère TOUT et on filtre localement
-            // avec notre logique floue. C'est plus lent mais beaucoup plus efficace pour les correspondances approximatives.
-            const allMoviesRes = await movieService.getAll();
-            
-            if (allMoviesRes.status === 'success' && allMoviesRes.data) {
-                // On cherche une correspondance floue
-                const foundMovies = allMoviesRes.data.filter(m => isFuzzyMatch(m.title, productTitle));
-                
-                if (foundMovies.length > 0) {
-                    setTerm(productTitle); // Affiche le titre trouvé par le scan
-                    setResults(foundMovies);
-                    setSearched(true);
-                    setLoading(false);
-                    return;
-                }
-            }
-            
-            // Si la recherche intelligente locale ne donne rien, on tente une recherche textuelle classique côté serveur
-            // au cas où le serveur aurait une logique différente ou pour afficher le titre nettoyé
-            setTerm(productTitle);
-            await performSearchInSheet(productTitle);
-        } else {
-            // Code barre inconnu ou erreur API : on cherche le code brut
-            await performSearchInSheet(query);
+            searchTerm = productTitle;
+            setTerm(productTitle); // Met à jour l'input pour montrer le titre trouvé
         }
-    } else {
-        await performSearchInSheet(query);
     }
+
+    // 2. Recherche standard via API (Rapide, mais exactitude requise)
+    let foundMovies: Movie[] = [];
+    const serverRes = await movieService.search(searchTerm);
+    
+    if (serverRes.status === 'success' && serverRes.data) {
+        foundMovies = serverRes.data;
+    }
+
+    // 3. FALLBACK INTELLIGENT
+    if (foundMovies.length === 0) {
+         const allMoviesRes = await movieService.getAll();
+         if (allMoviesRes.status === 'success' && allMoviesRes.data) {
+             foundMovies = allMoviesRes.data.filter(m => isFuzzyMatch(m.title, searchTerm));
+         }
+    }
+
+    setResults(foundMovies);
+    setSearched(true);
+    setLoading(false);
   };
 
   const handleScanSuccess = async (code: string) => {
@@ -131,9 +115,10 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
     handleSearch(undefined, code);
   };
 
+  // Re-lancer la recherche si une modification a eu lieu (suppression/edit)
   useEffect(() => {
     if (searched && term) {
-        // Si on revient sur la page et qu'il y avait une recherche
+        handleSearch();
     }
   }, [refreshTrigger]);
 
@@ -155,11 +140,21 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
                         value={term} 
                         onChange={(e: any) => setTerm(e.target.value)} 
                         placeholder="Titre ou code-barres..." 
-                        className="pl-10 pr-4"
+                        className="pl-10 pr-10"
                     />
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
                         {/^\d{8,14}$/.test(term.trim()) ? <Barcode className="w-5 h-5" /> : <Search className="w-5 h-5" />}
                     </div>
+                    {term && (
+                        <button
+                            type="button"
+                            onClick={() => setTerm('')}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-500 hover:text-slate-300 transition-colors"
+                            aria-label="Effacer"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
                 <Button 
                     type="submit" 
@@ -184,7 +179,7 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
       {loading && (
         <div className="flex flex-col items-center justify-center py-12 gap-3">
           <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-          <p className="text-slate-500 text-sm">Analyse du titre...</p>
+          <p className="text-slate-500 text-sm">Recherche dans la collection...</p>
         </div>
       )}
 
@@ -239,10 +234,15 @@ const LibraryPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) 
   }, [refreshTrigger]);
 
   const filteredMovies = useMemo(() => {
-    const q = normalizeText(filter);
+    if (!filter) {
+        return movies
+            .filter(m => m.support === activeTab)
+            .sort((a, b) => a.title.localeCompare(b.title));
+    }
+    
     return movies
       .filter(m => m.support === activeTab)
-      .filter(m => normalizeText(m.title).includes(q))
+      .filter(m => isFuzzyMatch(m.title, filter))
       .sort((a, b) => a.title.localeCompare(b.title));
   }, [movies, activeTab, filter]);
 
@@ -529,7 +529,6 @@ function App() {
 
   const handleDelete = async () => {
     if (!editingMovie) return;
-    // Removed window.confirm, now handled by UI state
     setEditLoading(true);
     const res = await movieService.delete(editingMovie.title, editingMovie.support);
     setEditLoading(false);

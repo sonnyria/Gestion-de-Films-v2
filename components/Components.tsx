@@ -178,7 +178,7 @@ export const BarcodeScannerModal = ({ isOpen, onClose, onScanSuccess }: { isOpen
                 }).catch(err => {
                     console.warn("Scanner stop error:", err);
                     // If stop fails, try to clear anyway
-                    scannerInstance?.clear().catch(() => {});
+                    scannerInstance?.clear();
                 });
             }
         };
