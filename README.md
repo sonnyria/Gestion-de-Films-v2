@@ -2,6 +2,22 @@
 
 Une application de gestion de collection de films moderne, connectée à Google Sheets.
 
+## Tutoriel utilisateur
+
+**[Lire le tutoriel complet : installation, Google Sheets et utilisation](docs/TUTORIEL.md)**
+
+Le guide explique l’organisation des quatre colonnes, la création du script,
+son déploiement, la récupération de l’URL `/exec`, la configuration du scanner
+et les opérations sur la collection.
+
+**[Ouvrir l’application](https://sonnyria.github.io/Gestion-de-Films-v2/)** ·
+**[Exemple de script Google Apps Script](Code.gs)**
+
+Pour une installation déjà fonctionnelle, conservez votre script Google actuel.
+L’exemple fourni sert à une nouvelle installation et n’est pas déployé
+automatiquement dans votre compte Google.
+
+
 ## Installation
 
 1. Cloner le repo
