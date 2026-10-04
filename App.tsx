@@ -231,6 +231,22 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
           <MovieRow key={idx} movie={movie} onClick={() => onEditMovie(movie)} />
         ))}
       </div>
+
+      {!loading && searched && !searchError && results.length > 0 && term.trim() && (
+        <div className="text-center space-y-3 pt-3">
+          <p className="text-sm text-slate-400">
+            Un autre titre ou une autre édition à enregistrer ?
+          </p>
+          <Button
+            onClick={() => navigate(`/add?title=${encodeURIComponent(term.trim())}`)}
+            variant="primary"
+            icon={Plus}
+            className="mx-auto"
+          >
+            Ajouter ce titre quand même
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
