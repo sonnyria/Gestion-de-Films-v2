@@ -9,6 +9,7 @@ export const getScriptUrl = (): string | null => {
 
 export const setScriptUrl = (url: string) => {
   localStorage.setItem(STORAGE_KEY, url);
+  collectionCache = null;
 };
 
 // Mock data for demo mode
@@ -34,41 +35,72 @@ const createUrl = (baseUrl: string, params: Record<string, string>) => {
   return url.toString();
 };
 
+// Cache only in memory: reloading the app always reloads the source collection.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+type CollectionCache = {
+  url: string;
+  expiresAt: number;
+  data?: Movie[];
+  pending?: Promise<ApiResponse<Movie[]>>;
+};
+let collectionCache: CollectionCache | null = null;
+
+const normalizeTitle = (value: string) => value.toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
 export const movieService = {
   async search(query: string): Promise<ApiResponse<Movie[]>> {
-    const url = getScriptUrl();
-    if (!url) return { status: 'error', message: 'API URL not configured' };
-
-    if (url === 'demo') {
-      const q = query.toLowerCase();
-      const results = MOCK_DB.filter(m => m.title.toLowerCase().includes(q));
-      return mockDelay({ status: 'success', data: results });
-    }
-
-    try {
-      const fetchUrl = createUrl(url, { action: 'search', query });
-      const res = await fetch(fetchUrl);
-      return await res.json();
-    } catch (e) {
-      return { status: 'error', message: 'Network error' };
-    }
+    const response = await movieService.getAll();
+    if (response.status !== 'success' || !response.data) return response;
+    const normalizedQuery = normalizeTitle(query);
+    return {
+      status: 'success',
+      data: response.data.filter(movie => normalizeTitle(movie.title).includes(normalizedQuery)),
+    };
   },
 
-  async getAll(): Promise<ApiResponse<Movie[]>> {
+  async getAll(forceRefresh = false): Promise<ApiResponse<Movie[]>> {
     const url = getScriptUrl();
     if (!url) return { status: 'error', message: 'API URL not configured' };
 
-    if (url === 'demo') {
-      return mockDelay({ status: 'success', data: [...MOCK_DB] });
+    if (!forceRefresh && collectionCache?.url === url) {
+      if (collectionCache.pending) return collectionCache.pending;
+      if (collectionCache.data && Date.now() < collectionCache.expiresAt) {
+        return { status: 'success', data: collectionCache.data };
+      }
     }
 
-    try {
-      const fetchUrl = createUrl(url, { action: 'getAll' });
-      const res = await fetch(fetchUrl);
-      return await res.json();
-    } catch (e) {
-      return { status: 'error', message: 'Network error' };
-    }
+    const cache: CollectionCache = { url, expiresAt: 0 };
+    collectionCache = cache;
+    cache.pending = (async (): Promise<ApiResponse<Movie[]>> => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        let response: ApiResponse<Movie[]>;
+        if (url === 'demo') {
+          response = { status: 'success', data: MOCK_DB.map(movie => ({ ...movie })) };
+        } else {
+          const res = await fetch(createUrl(url, { action: 'getAll' }), { signal: controller.signal });
+          if (!res.ok) throw new Error('Network error');
+          response = await res.json();
+        }
+        if (response.status === 'success' && Array.isArray(response.data)) {
+          cache.data = response.data;
+          cache.expiresAt = Date.now() + CACHE_TTL_MS;
+          return response;
+        }
+        return { status: 'error', message: response.message || 'Invalid collection response' };
+      } catch {
+        return { status: 'error', message: 'Impossible de charger la collection. Vérifiez la connexion et réessayez.' };
+      } finally {
+        clearTimeout(timeout);
+        cache.pending = undefined;
+      }
+    })();
+    const response = await cache.pending;
+    cache.pending = undefined;
+    return response;
   },
 
   async add(title: string, support: SupportType): Promise<ApiResponse<null>> {
@@ -76,6 +108,7 @@ export const movieService = {
     if (!url) return { status: 'error', message: 'API URL not configured' };
 
     if (url === 'demo') {
+      collectionCache = null;
       MOCK_DB.push({ title, support });
       return mockDelay({ status: 'success', message: 'Added in demo mode' });
     }
@@ -83,7 +116,9 @@ export const movieService = {
     try {
       const fetchUrl = createUrl(url, { action: 'add', title, support });
       const res = await fetch(fetchUrl);
-      return await res.json();
+      const response = await res.json();
+      if (response.status === 'success') collectionCache = null;
+      return response;
     } catch (e) {
       return { status: 'error', message: 'Network error' };
     }
@@ -94,6 +129,7 @@ export const movieService = {
     if (!url) return { status: 'error', message: 'API URL not configured' };
 
     if (url === 'demo') {
+      collectionCache = null;
       const idx = MOCK_DB.findIndex(m => m.title === oldTitle && m.support === support);
       if (idx !== -1) MOCK_DB[idx].title = newTitle;
       return mockDelay({ status: 'success', message: 'Updated in demo mode' });
@@ -102,7 +138,9 @@ export const movieService = {
     try {
       const fetchUrl = createUrl(url, { action: 'edit', oldTitle, newTitle, support });
       const res = await fetch(fetchUrl);
-      return await res.json();
+      const response = await res.json();
+      if (response.status === 'success') collectionCache = null;
+      return response;
     } catch (e) {
       return { status: 'error', message: 'Network error' };
     }
@@ -113,6 +151,7 @@ export const movieService = {
     if (!url) return { status: 'error', message: 'API URL not configured' };
 
     if (url === 'demo') {
+      collectionCache = null;
       MOCK_DB = MOCK_DB.filter(m => !(m.title === title && m.support === support));
       return mockDelay({ status: 'success', message: 'Deleted in demo mode' });
     }
@@ -120,7 +159,9 @@ export const movieService = {
     try {
       const fetchUrl = createUrl(url, { action: 'delete', title, support });
       const res = await fetch(fetchUrl);
-      return await res.json();
+      const response = await res.json();
+      if (response.status === 'success') collectionCache = null;
+      return response;
     } catch (e) {
       return { status: 'error', message: 'Network error' };
     }

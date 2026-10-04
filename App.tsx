@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Search, Library, Settings, Plus, Edit2, Save, RotateCw, Loader2, AlertCircle, Trash2, X, ScanLine, Barcode, Download } from 'lucide-react';
 import { movieService, getScriptUrl, setScriptUrl } from './services/movieService';
@@ -62,6 +62,13 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
   const [results, setResults] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const searchId = useRef(0);
+
+  useEffect(() => {
+    void movieService.getAll(); // Start loading before the first search.
+    return () => { searchId.current += 1; };
+  }, []);
   const [isScanning, setIsScanning] = useState(false);
   const navigate = useNavigate();
 
@@ -72,6 +79,8 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
     
     if (!query) return;
 
+    const currentSearch = ++searchId.current;
+    setSearchError('');
     setLoading(true);
     setResults([]); // Reset visual
     
@@ -82,16 +91,25 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
     // 1. Si c'est un code barre, on essaie d'abord de récupérer le titre produit
     if (isManualBarcode) {
         const productTitle = await barcodeService.getProductTitle(query);
+        if (currentSearch !== searchId.current) return;
         if (productTitle) {
             searchTerm = productTitle;
             setTerm(productTitle); // Met à jour l'input pour montrer le titre trouvé
         }
     }
 
-    // 2. Recherche standard via API (Rapide, mais exactitude requise)
+    // 2. Recherche locale dans la collection chargée et partagée.
     let foundMovies: Movie[] = [];
     const serverRes = await movieService.search(searchTerm);
     
+    if (currentSearch !== searchId.current) return;
+    if (serverRes.status === 'error') {
+      setSearchError(serverRes.message || 'Impossible de charger la collection.');
+      setLoading(false);
+      setSearched(false);
+      return;
+    }
+
     if (serverRes.status === 'success' && serverRes.data) {
         foundMovies = serverRes.data;
     }
@@ -104,6 +122,7 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
          }
     }
 
+    if (currentSearch !== searchId.current) return;
     setResults(foundMovies);
     setSearched(true);
     setLoading(false);
@@ -183,6 +202,8 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
         </div>
       )}
 
+      {searchError && <p role="alert" className="text-red-400 text-center py-6">{searchError}</p>}
+
       {!loading && searched && results.length === 0 && (
         <div className="text-center py-12 space-y-4 animate-fade-in">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-800 text-slate-600 mb-2">
@@ -220,9 +241,9 @@ const LibraryPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) 
   const [activeTab, setActiveTab] = useState<SupportType>('Blu-Ray');
   const [filter, setFilter] = useState('');
 
-  const fetchAll = async () => {
+  const fetchAll = async (forceRefresh = false) => {
     setLoading(true);
-    const res = await movieService.getAll();
+    const res = await movieService.getAll(forceRefresh);
     if (res.status === 'success' && res.data) {
       setMovies(res.data);
     }
@@ -251,7 +272,7 @@ const LibraryPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) 
       <div className="sticky top-0 z-10 bg-slate-950/90 backdrop-blur-md border-b border-slate-800 pt-4 px-4 -mx-4">
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-xl font-bold text-slate-100">Ma Bibliothèque</h1>
-          <button onClick={fetchAll} className="p-2 text-slate-400 hover:text-blue-400 transition-colors">
+          <button onClick={() => fetchAll(true)} className="p-2 text-slate-400 hover:text-blue-400 transition-colors">
             <RotateCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>

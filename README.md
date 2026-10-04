@@ -42,3 +42,18 @@ Ce projet utilise GitHub Actions. Une fois le code envoyé sur GitHub (push) :
 1. Allez sur votre repo GitHub > **Settings** > **Pages**.
 2. Dans "Source", assurez-vous que **GitHub Actions** est sélectionné (pas "Deploy from a branch").
 3. Le site sera visible sur : `https://[votre-pseudo].github.io/Gestion-de-Films-v2/`
+
+## Recherche et actualisation
+
+La collection est préchargée à l’ouverture de la page de recherche. Les recherches
+de titres se font ensuite localement, sans appel Google Apps Script pour chaque
+requête, y compris les correspondances sans accents et la recherche approchée.
+
+Le cache mémoire est partagé avec la bibliothèque pendant cinq minutes. Il est
+invalide après un ajout, une modification, une suppression ou un changement
+d’URL du script. Le bouton d’actualisation de la bibliothèque force un nouveau
+chargement, utile après une modification directe dans Google Sheets. Un
+rechargement de l’application recharge également la collection. Le premier
+chargement reste dépendant du temps de réponse de Google Apps Script.
+
+Vérifications avant déploiement : `npm test`, `npx tsc --noEmit`, `npm run build`.
