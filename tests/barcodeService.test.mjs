@@ -13,7 +13,7 @@ async function setup(body, status = 200) {
   const requests = [];
   globalThis.fetch = async url => {
     requests.push(url);
-    return { ok: status === 200, status, json: async () => body };
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   };
   return { ...module, requests, storage };
 }
@@ -73,6 +73,41 @@ test('rejected credentials and rate limits produce an actionable failure', async
     const { barcodeService } = await setup({}, status);
     const result = await barcodeService.lookup('883929106646');
     assert.equal(result.status, 'unavailable');
-    assert.match(result.message, status === 403 ? /clé CorsProxy/ : /limite/);
+    assert.match(result.message, status === 403 ? /403/ : /limite/);
   }
+});
+
+
+test('403 reports provider restrictions without accusing a correctly entered key', async () => {
+  const { barcodeService } = await setup({ error: { status: 403, message: 'This domain is not allowed' } }, 403);
+  const result = await barcodeService.lookup('883929106646');
+  assert.match(result.message, /This domain is not allowed/);
+  assert.doesNotMatch(result.message, /Vérifiez votre clé/);
+});
+
+test('provider diagnostics redact credentials even when echoed in an error', async () => {
+  const { barcodeService } = await setup({ error: { message: 'Blocked key=test-key URL https://corsproxy.io/?key=test-key' } }, 403);
+  const result = await barcodeService.lookup('883929106646');
+  assert.doesNotMatch(result.message, /test-key/);
+});
+
+test('HTML refusal is explained as an access block rather than a parsing or key failure', async () => {
+  const { barcodeService } = await setup({});
+  globalThis.fetch = async () => new Response('<html><body>Access denied by upstream</body></html>', { status: 403 });
+  const result = await barcodeService.lookup('883929106646');
+  assert.match(result.message, /Access denied by upstream/);
+  assert.doesNotMatch(result.message, /Vérifiez votre clé/);
+});
+
+test('connection test isolates a working proxy from a blocked catalogue', async () => {
+  const { barcodeService } = await setup({});
+  globalThis.fetch = async url => {
+    const target = new URL(url).searchParams.get('url');
+    return target.includes('jsonplaceholder')
+      ? new Response(JSON.stringify({ id: 1 }), { status: 200 })
+      : new Response(JSON.stringify({ error: { message: 'Upstream access denied' } }), { status: 403 });
+  };
+  const result = await barcodeService.testConnection('test-key');
+  assert.match(result, /CorsProxy : OK/);
+  assert.match(result, /Upstream access denied/);
 });

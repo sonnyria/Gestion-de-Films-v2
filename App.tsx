@@ -432,6 +432,8 @@ const AddPage = ({ onAdded }: { onAdded: (msg: string, type: 'success' | 'error'
 const ConfigPage = ({ notify, deferredPrompt, setDeferredPrompt }: { notify: NotifyFunc, deferredPrompt: any, setDeferredPrompt: any }) => {
   const [url, setUrl] = useState('');
   const [barcodeProxyKey, setProxyKey] = useState('');
+  const [testingBarcode, setTestingBarcode] = useState(false);
+  const [barcodeDiagnostic, setBarcodeDiagnostic] = useState('');
 
   useEffect(() => {
     setUrl(getScriptUrl() || '');
@@ -442,6 +444,16 @@ const ConfigPage = ({ notify, deferredPrompt, setDeferredPrompt }: { notify: Not
     setScriptUrl(url);
     setBarcodeProxyKey(barcodeProxyKey);
     notify('Configuration sauvegardée avec succès', 'success');
+  };
+
+  const handleBarcodeTest = async () => {
+    setTestingBarcode(true);
+    setBarcodeDiagnostic('');
+    try {
+      setBarcodeDiagnostic(await barcodeService.testConnection(barcodeProxyKey));
+    } finally {
+      setTestingBarcode(false);
+    }
   };
 
   const handleInstall = async () => {
@@ -474,6 +486,14 @@ const ConfigPage = ({ notify, deferredPrompt, setDeferredPrompt }: { notify: Not
           <p className="text-xs text-slate-400">La lecture caméra donne un numéro. Cette clé permet de rechercher automatiquement le titre du film dans le catalogue Internet UPCitemdb. Elle est enregistrée sur cet appareil.</p>
           <a href="https://corsproxy.io/" target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-blue-400 underline">Obtenir une clé CorsProxy gratuite</a>
           <p className="text-xs text-slate-500">Certains codes, notamment des éditions françaises, peuvent être absents du catalogue. Des limites quotidiennes de recherche s’appliquent.</p>
+          <Button variant="secondary" onClick={handleBarcodeTest} disabled={testingBarcode || !barcodeProxyKey.trim()}>
+            {testingBarcode ? <><Loader2 className="w-4 h-4 animate-spin" /> Test en cours...</> : 'Tester la recherche Internet'}
+          </Button>
+          {barcodeDiagnostic && (
+            <div role="status" className="text-sm text-slate-200 bg-slate-900 border border-slate-700 rounded-xl p-3 whitespace-pre-line break-words">
+              {barcodeDiagnostic}
+            </div>
+          )}
         </div>
         <div className="flex justify-end">
           <Button onClick={handleSave} icon={Save}>Sauvegarder</Button>
