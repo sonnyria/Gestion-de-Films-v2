@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Search, Library, Settings, Plus, Edit2, Save, RotateCw, Loader2, AlertCircle, Trash2, X, ScanLine, Barcode, Download } from 'lucide-react';
 import { movieService, getScriptUrl, setScriptUrl } from './services/movieService';
-import { barcodeService } from './services/barcodeService';
+import { barcodeService, getBarcodeProxyKey, setBarcodeProxyKey } from './services/barcodeService';
 import { Movie, SupportType, SUPPORT_OPTIONS } from './types';
 import { Button, Input, Card, Modal, Notification, BarcodeScannerModal, getSupportIcon, getSupportColor } from './components/Components';
 
@@ -63,6 +63,8 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [lookupCode, setLookupCode] = useState('');
+  const [searchStage, setSearchStage] = useState('Recherche dans la collection...');
   const searchId = useRef(0);
 
   useEffect(() => {
@@ -81,6 +83,8 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
 
     const currentSearch = ++searchId.current;
     setSearchError('');
+    setLookupCode('');
+    setSearchStage('Recherche dans la collection...');
     setLoading(true);
     setResults([]); // Reset visual
     
@@ -90,12 +94,19 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
 
     // 1. Si c'est un code barre, on essaie d'abord de récupérer le titre produit
     if (isManualBarcode) {
-        const productTitle = await barcodeService.getProductTitle(query);
+        setLookupCode(query);
+        setSearchStage('Recherche du titre du film sur Internet...');
+        const lookup = await barcodeService.lookup(query);
         if (currentSearch !== searchId.current) return;
-        if (productTitle) {
-            searchTerm = productTitle;
-            setTerm(productTitle); // Met à jour l'input pour montrer le titre trouvé
+        if (lookup.status !== 'success' || !lookup.title) {
+            setSearchError(lookup.message || 'Impossible de retrouver le titre du film.');
+            setSearched(false);
+            setLoading(false);
+            return; // Never search the collection or offer to add the barcode as a title.
         }
+        searchTerm = lookup.title;
+        setTerm(lookup.title);
+        setSearchStage('Recherche dans la collection...');
     }
 
     // 2. Recherche locale dans la collection chargée et partagée.
@@ -198,11 +209,25 @@ const SearchPage = ({ onEditMovie, refreshTrigger }: { onEditMovie: (m: Movie) =
       {loading && (
         <div className="flex flex-col items-center justify-center py-12 gap-3">
           <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-          <p className="text-slate-500 text-sm">Recherche dans la collection...</p>
+          <p className="text-slate-500 text-sm">{searchStage}</p>
         </div>
       )}
 
-      {searchError && <p role="alert" className="text-red-400 text-center py-6">{searchError}</p>}
+      {searchError && (
+        <div className="text-center space-y-3 py-6">
+          <p role="alert" className="text-red-400">{searchError}</p>
+          {lookupCode && (
+            <>
+              <p className="text-sm text-slate-400">Code lu : {lookupCode}. Vous pouvez saisir le titre manuellement ou vérifier sur le Web.</p>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Button variant="secondary" onClick={() => { setTerm(''); setLookupCode(''); setSearchError(''); }}>Saisir le titre</Button>
+                <Link to="/config" className="text-blue-400 underline px-3 py-2">Configurer la recherche</Link>
+                <a href={`https://www.google.com/search?q=${encodeURIComponent('"' + lookupCode + '" film DVD Blu-ray')}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline px-3 py-2">Vérifier sur Internet</a>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {!loading && searched && results.length === 0 && (
         <div className="text-center py-12 space-y-4 animate-fade-in">
@@ -406,13 +431,16 @@ const AddPage = ({ onAdded }: { onAdded: (msg: string, type: 'success' | 'error'
 
 const ConfigPage = ({ notify, deferredPrompt, setDeferredPrompt }: { notify: NotifyFunc, deferredPrompt: any, setDeferredPrompt: any }) => {
   const [url, setUrl] = useState('');
+  const [barcodeProxyKey, setProxyKey] = useState('');
 
   useEffect(() => {
     setUrl(getScriptUrl() || '');
+    setProxyKey(getBarcodeProxyKey());
   }, []);
 
   const handleSave = () => {
     setScriptUrl(url);
+    setBarcodeProxyKey(barcodeProxyKey);
     notify('Configuration sauvegardée avec succès', 'success');
   };
 
@@ -439,6 +467,13 @@ const ConfigPage = ({ notify, deferredPrompt, setDeferredPrompt }: { notify: Not
           <p className="text-xs text-slate-500">
             Entrez "demo" pour tester l'interface sans backend.
           </p>
+        </div>
+        <div className="space-y-2 border-t border-slate-700 pt-4">
+          <label htmlFor="barcode-proxy-key" className="text-xs font-bold text-slate-500 uppercase tracking-wider">Recherche par code-barres</label>
+          <input id="barcode-proxy-key" type="password" autoComplete="off" value={barcodeProxyKey} onChange={e => setProxyKey(e.target.value)} placeholder="Clé CorsProxy" className="w-full bg-slate-900/50 border border-slate-700 text-slate-100 px-4 py-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" />
+          <p className="text-xs text-slate-400">La lecture caméra donne un numéro. Cette clé permet de rechercher automatiquement le titre du film dans le catalogue Internet UPCitemdb. Elle est enregistrée sur cet appareil.</p>
+          <a href="https://corsproxy.io/" target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-blue-400 underline">Obtenir une clé CorsProxy gratuite</a>
+          <p className="text-xs text-slate-500">Certains codes, notamment des éditions françaises, peuvent être absents du catalogue. Des limites quotidiennes de recherche s’appliquent.</p>
         </div>
         <div className="flex justify-end">
           <Button onClick={handleSave} icon={Save}>Sauvegarder</Button>

@@ -57,3 +57,22 @@ rechargement de l’application recharge également la collection. Le premier
 chargement reste dépendant du temps de réponse de Google Apps Script.
 
 Vérifications avant déploiement : `npm test`, `npx tsc --noEmit`, `npm run build`.
+
+## Identification Internet d’un code-barres
+
+Le scanner lit le numéro UPC/EAN. L’application consulte ensuite UPCitemdb via
+CorsProxy pour obtenir le titre, puis recherche ce titre dans la collection.
+Elle n’utilise plus le numéro comme titre lorsqu’une identification échoue.
+
+Depuis GitHub Pages, l’API UPCitemdb n’autorise pas un accès direct par le
+navigateur. CorsProxy exige une clé : créer un compte gratuit sur
+https://corsproxy.io/, puis saisir la clé dans **Configuration → Recherche par
+code-barres** et sauvegarder. La clé reste dans le stockage local du navigateur ;
+aucune clé n’est intégrée au dépôt ou au build. La recherche par titre et la
+lecture caméra n’exigent pas cette clé.
+
+Le catalogue ne contient pas toutes les éditions ; les services ont des quotas.
+L’application distingue un code inconnu, une configuration absente et une erreur
+réseau, et limite l’attente à 12 secondes. Un lien vers une recherche Web est
+proposé si la conversion automatique ne peut pas aboutir. Les correspondances
+sont acceptées uniquement pour un produit vidéo dont le code correspond au scan.

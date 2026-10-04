@@ -123,6 +123,7 @@ export const BarcodeScannerModal = ({ isOpen, onClose, onScanSuccess }: { isOpen
         if (!isOpen) return;
 
         let isMounted = true;
+        let scanHandled = false;
         const elementId = "reader";
         let scannerInstance: Html5Qrcode | null = null;
 
@@ -146,7 +147,8 @@ export const BarcodeScannerModal = ({ isOpen, onClose, onScanSuccess }: { isOpen
                         aspectRatio: 1.0
                     },
                     (decodedText) => {
-                        if (isMounted) {
+                        if (isMounted && !scanHandled) {
+                            scanHandled = true;
                             // Call success but don't stop here manually if it causes race conditions
                             // The parent usually closes the modal which triggers cleanup
                             onScanSuccessRef.current(decodedText);
